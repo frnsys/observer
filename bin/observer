@@ -21,19 +21,19 @@ end
 
 # Spawn
 if ARGV[0] == "spawn"
-	Observer.spawn()
+	Observer::Observer.spawn()
 	exit
 end
 
 # Observe / Watch
 if ["observe", "watch"].include? ARGV[0]
-	o = Observer.new( ARGV[1] )
+	o = Observer::Observer.new( ARGV[1] )
 	o.observe()
 end
 
 # Push (a single file or folder)
 if ["push", "upload"].include? ARGV[0]
-	o = Observer.new( nil )
+	o = Observer::Observer.new( nil )
 	o.sync( ARGV[1], "push" )
 	
 	# TO DO

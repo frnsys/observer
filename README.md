@@ -1,29 +1,13 @@
 # Observer
+ A command line tool that will watch a directory for changes & sync it to a remote
+ directory (ftp or sftp)
+ 
+ Work in progress...
 
-TODO: Write a gem description
-
-## Installation
-
-Add this line to your application's Gemfile:
-
-    gem 'observer'
-
-And then execute:
-
-    $ bundle
-
-Or install it yourself as:
-
-    $ gem install observer
-
-## Usage
-
-TODO: Write usage instructions here
-
-## Contributing
-
-1. Fork it
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Commit your changes (`git commit -am 'Add some feature'`)
-4. Push to the branch (`git push origin my-new-feature`)
-5. Create new Pull Request
+ 
+## To Do
+* complete sftp support
+* add single file sync
+* add bidirectional sync
+* add remote/local file comparisons
+* turn into a gem
