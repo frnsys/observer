@@ -46,6 +46,10 @@ module Observer
 			@ward = !ward.nil? ? File.expand_path( ward ) : @wd
 		end
 
+		def debug( enabled )
+			@debug = enabled
+		end
+
 		def self.spawn
 			# sd = script directory. Where this file resides.
 			sd = sanitizePath( File.expand_path(File.dirname(__FILE__)) )
@@ -67,24 +71,32 @@ module Observer
 			FileUtils.cp( sdo, wdo )
 		end
 
-		def sync( file, direction )
+		def syncFile( file, direction )
 			# Prepare filepaths
 			file = File.expand_path(file)
 			remote_file = file.sub( @od, @remote_path )
-			remote_file = remote_file[1..-1] if remote_file[0] == "/"
-			puts "file => #{file}"
-			puts "remote_file => #{remote_file}"
-			puts "@od => #{@od}"
-			puts "@remote_path => #{@remote_path}"
+			# A leading slash will mess things up.
+			# Get rid of it if it's there
+			remote_file = remote_file[0] == "/" ? remote_file[1..-1] : remote_file
 
+			if @debug = true
+				puts "file => #{file}"
+				puts "remote_file => #{remote_file}"
+				puts "@od => #{@od}"
+				puts "@remote_path => #{@remote_path}"
+			end
+
+			# If the Observer's password is left unspecified,
+			# ask for one
 			if !@password
 				puts "Password:"
 				@password = STDIN.gets.chomp
 			end
 
+			puts "Connecting to #{@server}...".blue
+
 			# FTP
 			if @type.casecmp("ftp") == 0
-				puts "Connecting to #{@server}...".blue
 				ftp = Net::FTP.open( @server, @user, @password )
 				ftp.passive = true
 				puts "Syncing #{file} to " + remote_file.blue
@@ -94,16 +106,11 @@ module Observer
 
 			# SFTP
 			elsif @type.casecmp("sftp") == 0
-
-				# We get some problems if the path
-				# starts with "/", so need to remove it if it's there.
-				puts "Connecting to #{@server}...".blue
-
 				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
 
 					# Upload
 					if ["upload", "up", "push"].include? direction
-						puts "Uploading to #{remote_file}...".blue
+						puts "Uploading #{remote_file}...".blue
 
 						# Check if the file already exists
 						begin
@@ -139,9 +146,9 @@ module Observer
 							while true do
 								begin
 									# Check if each parent dir exists
-									target_dir = dirs.last[0] == "/" ? dirs.last[1..-1] : dirs.last
-									puts "target_dir => #{target_dir}"
-									sftp.open!( target_dir )
+									parent_dir = dirs.last[0] == "/" ? dirs.last[1..-1] : dirs.last
+									puts "parent_dir => #{parent_dir}" if @debug == true
+									sftp.open!( parent_drr )
 
 								rescue Net::SFTP::StatusException
 									# If it doesn't exist, keep track
@@ -155,7 +162,7 @@ module Observer
 
 									# Now create the directories
 									dirs.reverse_each do |dir|
-										puts "Making #{dir}".red
+										puts "Making #{dir}"
 										sftp.mkdir!(dir) 
 									end
 									break
@@ -165,31 +172,31 @@ module Observer
 							# If it failed, try uploading the file again
 							sftp.upload!( file, remote_file ) if !success
 
-							puts "Uploaded #{remote_file}"
-
 						end
 
 					# Download
 					elsif ["download", "down", "pull"].include? direction
-
+						
 						# Check if the file already exists
-						begin
-							existing_file = sftp.file.open(remote_file)
+						if File.exists?(file)
+							begin
+								existing_file = sftp.file.open(remote_file)
 
-							# Warn user that they're overwriting a newer file
-							if File.stat(file).mtime.to_i > existing_file.stat.mtime
-								puts "The file you are downloading is older than the local copy. Do you want to overwrite the local file? (y/n)".red
-								response = STDIN.gets.chomp
-								if yes?( response )
-									existing_file.close()
-									return
+								# Warn user that they're overwriting a newer file
+								if File.stat(file).mtime.to_i > existing_file.stat.mtime
+									puts "The file you are downloading is older than the local copy. Do you want to overwrite the local file? (y/n)".red
+									response = STDIN.gets.chomp
+									if yes?( response )
+										existing_file.close()
+										return
+									end
 								end
+								existing_file.close()
+							rescue
+								# File doesn't exist
+								puts "#{remote_file} doesn't seem to exist!".red
+								return
 							end
-							existing_file.close()
-						rescue
-							# File doesn't exist
-							puts "#{remote_file} doesn't seem to exist!".red
-							return
 						end
 
 						# Try the download
@@ -214,21 +221,27 @@ module Observer
 			end
 		end
 		
-		def push( item )
+		def sync( item, direction )
 			item = item || @ward
 
 			# If it's a directory, we should load up everything
 			if File.directory?(item)
 				files = collectFiles( item )
 				files.each do |file|
-					sync( file[0], "push" )
+					syncFile( file[0], direction )
 				end
 
 			# Otherwise just sync
 			else
-				sync( file, "push" )
+				syncFile( item, direction )
 
 			end
+		end
+		def push( item )
+			sync( item , "push" )
+		end
+		def pull( item )
+			sync( item, "pull" )
 		end
 
 		def observe
@@ -247,7 +260,7 @@ module Observer
 					files = newfiles
 					dfiles.each do |f|
 						puts f[0].red + " was changed. Syncing..."
-						sync( f, "push" )
+						syncFile( f, "push" )
 					end
 				end
 

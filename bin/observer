@@ -17,15 +17,14 @@ require "colored"
 trap("SIGINT") { exit }
 
 # Help
-if ARGV.length == 0
+if ARGV.length <= 1
+	if ARGV[0] == "spawn"
+		Observer::Observer.spawn()
+		exit
+	end
+
 	puts "observer spawn => spawns a new Observer (.observer.yml) in the current directory"
 	puts "observer observe or observer watch, pass in a directory or nothing to default to current directory"
-	exit
-end
-
-# Spawn
-if ARGV[0] == "spawn"
-	Observer::Observer.spawn()
 	exit
 end
 
@@ -39,16 +38,10 @@ end
 if ["push", "upload"].include? ARGV[0]
 	o = Observer::Observer.new( nil )
 	o.push( ARGV[1] )
-	
-	# TO DO
-	# Implement push
-
 end
 
 # Pull (a single file or folder)
 if ["pull", "download"].include? ARGV[0]
-
-	# TO DO
-	# Implement pull
-
+	o = Observer::Observer.new( nil )
+	o.pull( ARGV[1] )
 end
