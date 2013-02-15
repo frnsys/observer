@@ -1,0 +1,50 @@
+#!/usr/bin/env ruby
+
+begin
+  require 'observer'
+rescue LoadError
+  require 'rubygems'
+  require 'observer'
+end
+
+# Make console output pretty
+require "colored"
+
+trap("SIGINT") { exit }
+
+# Help
+if ARGV.length == 0
+	puts "observer spawn => spawns a new Observer (.observer.yml) in the current directory"
+	puts "observer observe or observer watch, pass in a directory or nothing to default to current directory"
+	exit
+end
+
+# Spawn
+if ARGV[0] == "spawn"
+	Observer.spawn()
+	exit
+end
+
+# Observe / Watch
+if ["observe", "watch"].include? ARGV[0]
+	o = Observer.new( ARGV[1] )
+	o.observe()
+end
+
+# Push (a single file or folder)
+if ["push", "upload"].include? ARGV[0]
+	o = Observer.new( nil )
+	o.sync( ARGV[1], "push" )
+	
+	# TO DO
+	# Implement push
+
+end
+
+# Pull (a single file or folder)
+if ["pull", "download"].include? ARGV[0]
+
+	# TO DO
+	# Implement pull
+
+end

@@ -1,0 +1,14 @@
+# sftp or ftp
+type: sftp
+server: ssh.hostname.com
+user: username
+# password: password
+port: 22
+remote_path: /
+ignore:
+  - .observer.yml
+  - .git
+  - .gitignore
+  - .svn
+  - .DS_Store
+  - Thumbs.db
