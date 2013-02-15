@@ -11,7 +11,7 @@ module Observer
   class Observer
 
 		def initialize( ward )
-			# Working directory. Where the script has been called.
+			# wd = working directory. Where the script has been called.
 			@wd = sanitizePath( File.expand_path(".") )
 
 			# od = Observer directory. Where the Observer resides
@@ -47,7 +47,10 @@ module Observer
 		end
 
 		def self.spawn
+			# sd = script directory. Where this file resides.
 			sd = sanitizePath( File.expand_path(File.dirname(__FILE__)) )
+			# wd = working directory. Where the script has been called.
+			@wd = sanitizePath( File.expand_path(".") )
 			sdo = sd + "observer/observer.yml"
 			wdo = @wd + ".observer.yml"
 
@@ -68,6 +71,11 @@ module Observer
 			# Prepare filepaths
 			file = File.expand_path(file)
 			remote_file = file.sub( @od, @remote_path )
+			remote_file = remote_file[1..-1] if remote_file[0] == "/"
+			puts "file => #{file}"
+			puts "remote_file => #{remote_file}"
+			puts "@od => #{@od}"
+			puts "@remote_path => #{@remote_path}"
 
 			if !@password
 				puts "Password:"
@@ -76,7 +84,7 @@ module Observer
 
 			# FTP
 			if @type.casecmp("ftp") == 0
-				@server = @server[1..-1] if @server[0] == "/"
+				puts "Connecting to #{@server}...".blue
 				ftp = Net::FTP.open( @server, @user, @password )
 				ftp.passive = true
 				puts "Syncing #{file} to " + remote_file.blue
@@ -89,12 +97,13 @@ module Observer
 
 				# We get some problems if the path
 				# starts with "/", so need to remove it if it's there.
-				@server = @server[1..-1] if @server[0] == "/"
+				puts "Connecting to #{@server}...".blue
 
 				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
 
 					# Upload
 					if ["upload", "up", "push"].include? direction
+						puts "Uploading to #{remote_file}...".blue
 
 						# Check if the file already exists
 						begin
@@ -116,7 +125,6 @@ module Observer
 
 						# Try the upload
 						begin
-							puts "Uploading #{remote_file}..."
 							sftp.upload!( file, remote_file )
 							success = true
 
@@ -131,7 +139,9 @@ module Observer
 							while true do
 								begin
 									# Check if each parent dir exists
-									sftp.open!( dirs.last )
+									target_dir = dirs.last[0] == "/" ? dirs.last[1..-1] : dirs.last
+									puts "target_dir => #{target_dir}"
+									sftp.open!( target_dir )
 
 								rescue Net::SFTP::StatusException
 									# If it doesn't exist, keep track
@@ -145,6 +155,7 @@ module Observer
 
 									# Now create the directories
 									dirs.reverse_each do |dir|
+										puts "Making #{dir}".red
 										sftp.mkdir!(dir) 
 									end
 									break
@@ -208,9 +219,9 @@ module Observer
 
 			# If it's a directory, we should load up everything
 			if File.directory?(item)
-				files = collectFiles( folder )
+				files = collectFiles( item )
 				files.each do |file|
-					sync( file, "push" )
+					sync( file[0], "push" )
 				end
 
 			# Otherwise just sync
@@ -263,9 +274,12 @@ module Observer
 
 		# Most paths need to have a trailing "/"
 		# Add it if necessary
-		def sanitizePath( path )
+		def self.sanitizePath( path )
 			path << "/" if path[-1] != "/"
 			return path
+		end
+		def sanitizePath( path )
+			return self.class.sanitizePath( path )
 		end
 
 		def yes?( response )

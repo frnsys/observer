@@ -12,8 +12,8 @@ Gem::Specification.new do |gem|
   gem.summary       = %q{Monitor and sync local files to a server with ftp or sftp}
   gem.homepage      = "https://github.com/ftzeng/observer"
 
-  s.add_runtime_dependency 'colored', '>= 1.2'
-  s.add_runtime_dependency 'net-sftp', '>= 2.1.1'
+  gem.add_runtime_dependency 'colored', '>= 1.2'
+  gem.add_runtime_dependency 'net-sftp', '>= 2.1.1'
 
   gem.files         = `git ls-files`.split($/)
   gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }

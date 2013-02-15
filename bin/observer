@@ -1,11 +1,15 @@
 #!/usr/bin/env ruby
 
+=begin
 begin
   require 'observer'
 rescue LoadError
   require 'rubygems'
   require 'observer'
 end
+=end
+
+require File.expand_path( File.dirname(__FILE__) + "/../lib/observer.rb" )
 
 # Make console output pretty
 require "colored"
@@ -34,7 +38,7 @@ end
 # Push (a single file or folder)
 if ["push", "upload"].include? ARGV[0]
 	o = Observer::Observer.new( nil )
-	o.sync( ARGV[1], "push" )
+	o.push( ARGV[1] )
 	
 	# TO DO
 	# Implement push
