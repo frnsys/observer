@@ -4,13 +4,18 @@ require "net/ftp"
 require "net/sftp"
 require "find"
 require "fileutils"
-require "observer/version"
 require "colored"
+require_relative "observer/sftp_compatibility.rb"
 
 module Observer
   class Observer
 
+		PUSH = ["up", "upload", "push"]
+		PULL = ["down", "download", "pull"]
+
 		def initialize( ward )
+			@debug = true
+
 			# wd = working directory. Where the script has been called.
 			@wd = sanitizePath( File.expand_path(".") )
 
@@ -60,8 +65,7 @@ module Observer
 
 			if File.exist?( wdo )
 				puts "An Observer already exists here, do you want to replace it? (y/n)".red
-				response = STDIN.gets.chomp
-				if yes?( response )
+				if !yes?( STDIN.gets.chomp )
 					puts "Exiting..."
 					exit
 				end
@@ -69,19 +73,22 @@ module Observer
 
 			puts "Spawning observer...".blue
 			FileUtils.cp( sdo, wdo )
+			puts ".observer.yml".green + " was created for this directory." + " Please configure it for your server.".green
 		end
 
 		def syncFile( file, direction )
 			# Prepare filepaths
 			file = File.expand_path(file)
-			remote_file = file.sub( @od, @remote_path )
+			remote_filepath = file.sub( @od, @remote_path )
 			# A leading slash will mess things up.
 			# Get rid of it if it's there
-			remote_file = remote_file[0] == "/" ? remote_file[1..-1] : remote_file
+			remote_filepath = remote_filepath[0] == "/" ? remote_filepath[1..-1] : remote_filepath
+			remote_dirs = remote_filepath.split(File::SEPARATOR)
+			remote_file = remote_dirs.pop()
 
-			if @debug = true
+			if @debug == true
 				puts "file => #{file}"
-				puts "remote_file => #{remote_file}"
+				puts "remote_filepath => #{remote_filepath}"
 				puts "@od => #{@od}"
 				puts "@remote_path => #{@remote_path}"
 			end
@@ -97,20 +104,93 @@ module Observer
 
 			# FTP
 			if @type.casecmp("ftp") == 0
-				ftp = Net::FTP.open( @server, @user, @password )
-				ftp.passive = true
-				puts "Syncing #{file} to " + remote_file.blue
-				ftp.putbinaryfile(file, remote_file)
-				ftp.close
-				puts "Upload successful.".green
+
+				begin
+					ftp = Net::FTP.open( @server, @user, @password )
+				rescue Net::FTPPermError
+					puts "Login incorrect.".red
+					exit
+				else
+					ftp.passive = true
+
+					# Upload
+					if PUSH.include? direction
+						puts "Uploading #{remote_filepath}...".blue
+
+						# Since FTP puts us in the server's root dir,
+						# we need to look for the "public" or "www" dir:
+						# ====================================================
+						# This may need revising.
+						# NOTE need to let it first try the supplied directory,
+						# if not, try the following two:
+						ftp.nlst().each do |dir|
+							if ["public", "www"].include?(dir)
+								ftp.chdir(dir)
+								break
+							end
+						end
+
+						remote_dirs.each do |dir|
+							if !ftp.nlst().include?(dir)
+								puts "Making #{dir}"
+								ftp.mkdir(dir)
+							end
+							ftp.chdir(dir)
+						end
+
+						# Check for existing file
+						# and compare modification time
+						if ftp.nlst().include? remote_file
+							if ftp.mtime(remote_file).to_i > File.stat(file).mtime.to_i
+									puts "The file you are uploading is older than the one on the server. Do you want to overwrite the server file? (y/n)".red
+									if !yes?( STDIN.gets.chomp )
+										ftp.close()
+										return
+									end
+							end
+						end
+
+						ftp.putbinaryfile(file, remote_file)
+						puts "Upload successful.".green
+
+					# Download
+					elsif PULL.include? direction
+						begin
+							ftp.getbinaryfile(remote_filepath, file)
+						rescue Net::FTPPermError
+							# File doesn't exist
+							puts "#{remote_filepath} doesn't seem to exist!".red
+							return
+						end
+					end
+
+					ftp.close()
+				end
 
 			# SFTP
 			elsif @type.casecmp("sftp") == 0
-				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
-
+				Net::SSH.start( @server, @user, :password => @password ) do |sftp|
 					# Upload
-					if ["upload", "up", "push"].include? direction
-						puts "Uploading #{remote_file}...".blue
+					if PUSH.include? direction
+						puts "Uploading #{remote_filepath}...".blue
+
+						remote_dirs.each do |dir|
+							dirs = sftp.dir.entries(".").map { |dir| dir.name }
+							if !dirs.include?(dir)
+								puts "Making #{dir}"
+								sftp.mkdir!(dir)
+							end
+							sftp.chdir(dir)
+
+							puts sftp.nlst()
+
+							exit
+						end
+
+						sftp.dir.foreach(".") do |dir|
+							puts dir.name
+						end
+						exit
 
 						# Check if the file already exists
 						begin
@@ -119,8 +199,7 @@ module Observer
 							# Warn user that they're overwriting a newer file
 							if File.stat(file).mtime.to_i < existing_file.stat.mtime
 								puts "The file you are uploading is older than the one on the server. Do you want to overwrite the server file? (y/n)".red
-								response = STDIN.gets.chomp
-								if yes?( response )
+								if !yes?( STDIN.gets.chomp )
 									existing_file.close()
 									return
 								end
@@ -163,7 +242,7 @@ module Observer
 									# Now create the directories
 									dirs.reverse_each do |dir|
 										puts "Making #{dir}"
-										sftp.mkdir!(dir) 
+										sftp.mkdir!(dir)
 									end
 									break
 								end
@@ -171,11 +250,12 @@ module Observer
 
 							# If it failed, try uploading the file again
 							sftp.upload!( file, remote_file ) if !success
+							puts "Upload successful.".green
 
 						end
 
 					# Download
-					elsif ["download", "down", "pull"].include? direction
+					elsif PULL.include? direction
 						
 						# Check if the file already exists
 						if File.exists?(file)
@@ -185,8 +265,7 @@ module Observer
 								# Warn user that they're overwriting a newer file
 								if File.stat(file).mtime.to_i > existing_file.stat.mtime
 									puts "The file you are downloading is older than the local copy. Do you want to overwrite the local file? (y/n)".red
-									response = STDIN.gets.chomp
-									if yes?( response )
+									if !yes?( STDIN.gets.chomp )
 										existing_file.close()
 										return
 									end
@@ -203,7 +282,7 @@ module Observer
 						begin
 							sftp.download!( remote_file, file )
 
-						rescue Net::SFTP::StatusException
+						rescue Net::SFTP::StatusException, RuntimeError
 							puts "#{remote_file} doesn't seem to exist!".red
 							return
 
@@ -220,7 +299,7 @@ module Observer
 				exit
 			end
 		end
-		
+
 		def sync( item, direction )
 			item = item || @ward
 
@@ -296,7 +375,7 @@ module Observer
 		end
 
 		def yes?( response )
-			return !["y", "yes", "yeah", "yea"].include?(response.downcase)
+			return ["y", "yes", "yeah", "yea"].include?(response.downcase)
 		end
 
 	end
