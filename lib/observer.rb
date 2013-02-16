@@ -232,8 +232,9 @@ module Observer
 
 			puts "Downloading #{r_filepath}...".blue
 
+			ftp.getbinaryfile(r_filepath, file)
+			exit
 			begin
-				ftp.getbinaryfile(r_filepath, file)
 			rescue
 				# File doesn't exist
 				puts "#{r_filepath} doesn't seem to exist!".red

@@ -1,5 +1,5 @@
 # This mirrors the methods of Ruby's Net::FTP module.
-# From Philip Matarese
+# Originally by Philip Matarese
 # http://rubyforge.org/projects/sftp-compat/
 # Updated by Francis Tseng
 
@@ -8,7 +8,7 @@ module Net
     class Session
       def mkdir(path)
         @current_path ||= '.'
-        mkdir!( File.join(@current_path, path) )
+				wait_for( request :mkdir, File.join(@current_path, path), {} )
       end
 
       def rmdir(path)
@@ -24,6 +24,10 @@ module Net
           @current_path = File.join(@current_path, path)
         end
       end
+
+			def getbinaryfile(remotefile, localfile = File.basename(remotefile))
+				download!( remotefile, localfile )
+			end
 
       def putbinaryfile(localfile, remotefile)
         @current_path ||= '.'
@@ -48,7 +52,6 @@ module Net
 
       def nlst
         @current_path ||= '.'
-        #handle = opendir(@current_path)
 				handle = @current_path
         list = dir.entries(handle).map{|f| f.name}
         close(handle)
@@ -57,7 +60,10 @@ module Net
 
 			def mtime(path)
 				@current_path ||= '.'
-				return stat!( File.join(@current_path, path) ).mtime
+				_file = file.open( File.join(@current_path, path) )
+				mtime = _file.stat.mtime
+				_file.close()
+				return mtime
 			end
     end
   end
