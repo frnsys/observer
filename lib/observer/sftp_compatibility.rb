@@ -41,7 +41,11 @@ module Net
       def nlst(path = '.')
         @current_path ||= '.'
 				handle = File.join(@current_path, path)
-        list = dir.entries(handle).map{|f| f.name}
+				begin
+					list = dir.entries(handle).map{|f| f.name}
+				rescue
+					list = [handle]
+				end
         close(handle)
         return list
       end

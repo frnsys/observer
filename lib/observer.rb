@@ -36,13 +36,15 @@ module Observer
 			o = YAML.load_file(@od + ".observer.yml")
 
 			@type = o["type"]
+
+			puts "type => #{@type}".magenta if @debug
+
 			@user = o["user"]
 			@password = o["password"] || nil
 			@ignore = o["ignore"]
 
 			# Remove the leading "/" if necessary
-			@server = o["server"]
-			@server = @server[1..-1] if @server[0] == "/"
+			@server = clipRoot( o["server"] )
 
 			@remote_path = prepPath( o["remote_path"] )
 
@@ -84,11 +86,7 @@ module Observer
 
 			# Prepare filepaths
 			params[:file] = File.expand_path(file)
-			r_filepath = params[:file].sub( @od, @remote_path )
-
-			# A leading slash will mess things up.
-			# Get rid of it if it's there
-			params[:r_filepath] = r_filepath[0] == "/" ? r_filepath[1..-1] : r_filepath
+			params[:r_filepath] = clipRoot( params[:file].sub( @od, @remote_path ) )
 			params[:r_dirs] = params[:r_filepath].split(File::SEPARATOR)
 			params[:r_file] = params[:r_dirs].pop()
 
@@ -185,17 +183,52 @@ module Observer
 			end
 		end
 
+		# Get rid of extra files and folders
 		def prune( folder, direction )
-			# Collect files starting at node "item"
-			# Both locally and remotely
-			files = collectRemoteFiles( folder )
+			local_files = collectFiles( folder, true ).keys.map { |file| File.expand_path( file ) }
+			remote_files = collectRemoteFiles( folder ).keys
+
+			if UP.include?(direction)
+				local_files.map! { |file| file.sub( @od, clipRoot(@remote_path) ) }
+				diff = remote_files - local_files
+
+				if @debug
+					puts remote_files.inspect
+					puts local_files.inspect
+					puts diff.inspect
+				end
+
+				# TO DO do the remote deletes
+
+			elsif DOWN.include?(direction)
+				remote_files.map! { |file| file.sub( clipRoot(@remote_path), @od ) }
+				diff = local_files - remote_files
+
+				if @debug
+					puts remote_files.inspect
+					puts local_files.inspect
+					puts diff.inspect
+				end
+
+				puts "The following files will be deleted:".red
+				puts diff
+				puts "Do you want to continue? (y/n)".red
+				exit if !yes?( STDIN.gets.chomp )
+				FileUtils.rm_r(diff)
+
+			else
+				puts "Unrecognized direction."
+				exit
+			end
+
+			exit
 		end
 
 		# Push
 		def push( item )
 			#transfer( item, "push" )
 			# temporary, for testing:
-			prune( item, "push" )
+			prune( item, "pull" )
 		end
 		def syncUp( item )
 			# transfer( item, "push" )
@@ -285,25 +318,26 @@ module Observer
 		end
 
 		private
-		def collectFiles( folder )
+		def connect
+
+		end
+
+		def collectFiles( folder, inc_folders = false )
 			files = Hash.new
 			Find.find( folder ) do |item|
 				if @ignore.include?( File.basename(item) )
 					Find.prune
 					
 				else
-					# We only want to include files, not folders
-					if !File.directory?(item)
-						files[item] = File.stat(item).mtime.to_i
-					end
+					next if !inc_folders && File.directory?(item)
+					next if [".", "..", folder].include?(item)
+					files[item] = File.stat(item).mtime.to_i
 				end
 			end
 			return files
 		end
 		def collectRemoteFiles( folder )
-			r_files = Hash.new
-			r_path = prepPath( File.expand_path( folder ) ).sub( @od, @remote_path )
-			r_path = r_path[0] == "/" ? r_path[1..-1] : r_path
+			r_path = clipRoot( prepPath( File.expand_path( folder ) ).sub( @od, @remote_path ) )
 
 			if @debug
 				puts "@od => #{@od}"
@@ -336,13 +370,15 @@ module Observer
 						end
 					end
 
+					return remoteFind( ftp, r_path, {} )
+
 				end
 				ftp.close()
 
+			# SFTP
 			elsif @type.casecmp("sftp") == 0
 				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
-					files = Hash.new
-					puts remoteFind( sftp, r_path, files )
+					return remoteFind( sftp, r_path, {} )
 				end
 
 			else
@@ -353,28 +389,38 @@ module Observer
 		end
 
 		# A remote version of File.find
-		def remoteFind( ftp, folder, hash )
-			puts "current folder => #{folder}" if @debug
+		def remoteFind( ftp, path, hash )
+			puts "current path => #{path}" if @debug
 
-			ftp.chdir( folder )
-			ftp.nlst().each do |item|
-				if @ignore.include?( File.basename(item) )
-					puts "ignoring #{item}" if @debug
-					next
-				else
-					if [".", ".."].include?(item)
-						next
-					end
-					puts "current item => #{item}" if @debug
+			ftp.nlst(path).each do |item|
+				next if [".", "..", File.join(path, "."), File.join(path, "..")].include?(item)
+				next if @ignore.include?( File.basename(item) )
+				item = File.join(path, item) if !item.include?(path)
 
+				puts "current item => #{item}" if @debug
+
+				# Net::FTP will throw an FTPPermError
+				# if trying to mtime a directory.
+				begin
 					hash[item] = ftp.mtime(item).to_i
-					if File.directory?(item)
-						remoteFind( ftp, item, hash )
-					end
+				rescue Net::FTPPermError
+					hash[item] = "n/a"
+				end
+
+				# So far I have not been able to find
+				# any reliable equivalent of File.directory?
+				# for remote files.
+				# However, there's a heuristic we can use.
+				# ftp.nlst(item).length > 1 means it's a directory,
+				# since it will include at the very least "item/."
+				# and "item/.." (i.e. have a length of 2). If it's
+				# a file, only the file itself will be included.
+				if ftp.nlst(item).length > 1
+					puts "#{item} is a directory".red if @debug
+					remoteFind( ftp, item, hash )
 				end
 			end
-			puts "finished #{folder}".blue if @debug
-			ftp.chdir("..")
+			puts "finished #{path}".blue if @debug
 			return hash
 		end
 
@@ -386,6 +432,10 @@ module Observer
 		end
 		def prepPath( path )
 			return self.class.prepPath( path )
+		end
+		def clipRoot( path )
+			clipped_path = path[0] == "/" ? path[1..-1] : path
+			return clipped_path
 		end
 
 		def yes?( response )
