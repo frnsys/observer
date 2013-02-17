@@ -10,14 +10,14 @@ require_relative "observer/sftp_compatibility.rb"
 module Observer
   class Observer
 
-		PUSH = ["up", "upload", "push"]
-		PULL = ["down", "download", "pull"]
+		UP = ["up", "upload", "push"]
+		DOWN = ["down", "download", "pull"]
 
 		def initialize( ward )
 			@debug = true
 
 			# wd = working directory. Where the script has been called.
-			@wd = sanitizePath( File.expand_path(".") )
+			@wd = prepPath( File.expand_path(".") )
 
 			# od = Observer directory. Where the Observer resides
 			@od = @wd
@@ -31,7 +31,7 @@ module Observer
 				end
 			end
 
-			sanitizePath( @od )
+			prepPath( @od )
 			puts "Found Observer at #{@od}.observer.yml".green
 			o = YAML.load_file(@od + ".observer.yml")
 
@@ -44,7 +44,7 @@ module Observer
 			@server = o["server"]
 			@server = @server[1..-1] if @server[0] == "/"
 
-			@remote_path = sanitizePath( o["remote_path"] )
+			@remote_path = prepPath( o["remote_path"] )
 
 			# Default to the current directory
 			# Ward is the target: a directory to watch or sync, or a file to sync
@@ -57,10 +57,10 @@ module Observer
 
 		def self.spawn
 			# sd = script directory. Where this file resides.
-			sd = sanitizePath( File.expand_path(File.dirname(__FILE__)) )
+			sd = prepPath( File.expand_path(File.dirname(__FILE__)) )
 
 			# wd = working directory. Where the script has been called.
-			@wd = sanitizePath( File.expand_path(".") )
+			@wd = prepPath( File.expand_path(".") )
 
 			# Observer prototype and new "instance"
 			sdo = sd + "observer/observer.yml"
@@ -79,7 +79,7 @@ module Observer
 			puts ".observer.yml".green + " was created for this directory." + " Please configure it for your server.".green
 		end
 
-		def syncFile( file, direction )
+		def transferFile( file, direction )
 			params = Hash.new
 
 			# Prepare filepaths
@@ -120,7 +120,7 @@ module Observer
 					ftp.passive = true
 
 					# Upload
-					if PUSH.include? direction
+					if UP.include? direction
 
 						# Since FTP puts us in the server's root dir,
 						# we need to look for the "public" or "www" dir:
@@ -138,7 +138,7 @@ module Observer
 						upload( ftp, params )
 
 					# Download
-					elsif PULL.include? direction
+					elsif DOWN.include? direction
 						download( ftp, params )
 
 					end
@@ -151,42 +151,57 @@ module Observer
 				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
 
 					# Upload
-					if PUSH.include? direction
+					if UP.include? direction
 						upload( sftp, params )
 
 					# Download
-					elsif PULL.include? direction
+					elsif DOWN.include? direction
 						download( sftp, params )
 
 					end
 				end
 
 			else
-				puts "Unrecognized protocol type. Please use either 'ftp' or 'sftp'".red
+				puts "Unrecognized protocol. Please use either 'ftp' or 'sftp'".red
 				exit
+
 			end
 		end
 
-		def sync( item, direction )
+		def transfer( item, direction )
 			item = item || @ward
 
 			# If it's a directory, we should load up everything
 			if File.directory?(item)
 				files = collectFiles( item )
 				files.each do |file|
-					syncFile( file[0], direction )
+					transferFile( file[0], direction )
 				end
 
 			# Otherwise just sync
 			else
-				syncFile( item, direction )
+				transferFile( item, direction )
 
 			end
 		end
 
+		def prune( folder, direction )
+			# Collect files starting at node "item"
+			# Both locally and remotely
+			files = collectRemoteFiles( folder )
+		end
+
 		# Push
 		def push( item )
-			sync( item, "push" )
+			#transfer( item, "push" )
+			# temporary, for testing:
+			prune( item, "push" )
+		end
+		def syncUp( item )
+			# transfer( item, "push" )
+			if File.directory?(item)
+				prune( item, "push" )
+			end
 		end
 		def upload( ftp, params )
 			r_filepath = params[:r_filepath]
@@ -222,7 +237,10 @@ module Observer
 
 		# Pull
 		def pull( item )
-			sync( item, "pull" )
+			transfer( item, "pull" )
+		end
+		def syncDown( item )
+			transfer( item, "pull" )
 		end
 		def download( ftp, params )
 			r_filepath = params[:r_filepath]
@@ -232,9 +250,8 @@ module Observer
 
 			puts "Downloading #{r_filepath}...".blue
 
-			ftp.getbinaryfile(r_filepath, file)
-			exit
 			begin
+				ftp.getbinaryfile(r_filepath, file)
 			rescue
 				# File doesn't exist
 				puts "#{r_filepath} doesn't seem to exist!".red
@@ -259,7 +276,7 @@ module Observer
 					files = newfiles
 					dfiles.each do |f|
 						puts f[0].red + " was changed. Syncing..."
-						syncFile( f, "push" )
+						transferFile( f, "push" )
 					end
 				end
 
@@ -270,28 +287,105 @@ module Observer
 		private
 		def collectFiles( folder )
 			files = Hash.new
-			Find.find( folder ) do |path|
-				if @ignore.include?( File.basename(path) )
+			Find.find( folder ) do |item|
+				if @ignore.include?( File.basename(item) )
 					Find.prune
 					
 				else
 					# We only want to include files, not folders
-					if !File.directory?(path)
-						files[path] = File.stat(path).mtime.to_i
+					if !File.directory?(item)
+						files[item] = File.stat(item).mtime.to_i
 					end
 				end
 			end
 			return files
 		end
+		def collectRemoteFiles( folder )
+			r_files = Hash.new
+			r_path = prepPath( File.expand_path( folder ) ).sub( @od, @remote_path )
+			r_path = r_path[0] == "/" ? r_path[1..-1] : r_path
+
+			if @debug
+				puts "@od => #{@od}"
+				puts "@remote_path => #{@remote_path}"
+				puts "r_path => #{r_path}"
+			end
+
+			# If the Observer's password is left unspecified,
+			# ask for one
+			if !@password
+				puts "Password:"
+				@password = STDIN.gets.chomp
+			end
+
+			#FTP
+			if @type.casecmp("ftp") == 0
+				begin
+					ftp = Net::FTP.open( @server, @user, @password )
+				rescue Net::FTPPermError
+					puts "Login incorrect.".red
+					exit
+				else
+					ftp.passive = true
+
+					# Try to find proper dir
+					ftp.nlst().each do |dir|
+						if ["public", "www"].include?(dir)
+							ftp.chdir(dir)
+							break
+						end
+					end
+
+				end
+				ftp.close()
+
+			elsif @type.casecmp("sftp") == 0
+				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
+					files = Hash.new
+					puts remoteFind( sftp, r_path, files )
+				end
+
+			else
+				puts "Unrecognized protocol. Please use either 'ftp' or 'sftp'".red
+				exit
+
+			end
+		end
+
+		# A remote version of File.find
+		def remoteFind( ftp, folder, hash )
+			puts "current folder => #{folder}" if @debug
+
+			ftp.chdir( folder )
+			ftp.nlst().each do |item|
+				if @ignore.include?( File.basename(item) )
+					puts "ignoring #{item}" if @debug
+					next
+				else
+					if [".", ".."].include?(item)
+						next
+					end
+					puts "current item => #{item}" if @debug
+
+					hash[item] = ftp.mtime(item).to_i
+					if File.directory?(item)
+						remoteFind( ftp, item, hash )
+					end
+				end
+			end
+			puts "finished #{folder}".blue if @debug
+			ftp.chdir("..")
+			return hash
+		end
 
 		# Most paths need to have a trailing "/"
 		# Add it if necessary
-		def self.sanitizePath( path )
+		def self.prepPath( path )
 			path << "/" if path[-1] != "/"
 			return path
 		end
-		def sanitizePath( path )
-			return self.class.sanitizePath( path )
+		def prepPath( path )
+			return self.class.prepPath( path )
 		end
 
 		def yes?( response )

@@ -30,19 +30,7 @@ module Net
 			end
 
       def putbinaryfile(localfile, remotefile)
-        @current_path ||= '.'
-
-        begin
-          handle = open(File.join(@current_path, remotefile), "w")
-          file = Kernel.open(localfile)
-          file.binmode
-          result = write(handle, 0, file.read)
-
-          # raise(StandardError, result.message) unless result.code == 0
-        ensure
-          file.close
-          close(handle)
-        end
+				sftp.upload!( localfile, remotefile )
       end
 
       def delete(path)
@@ -50,9 +38,9 @@ module Net
         remove File.join(@current_path, path)
       end
 
-      def nlst
+      def nlst(path = '.')
         @current_path ||= '.'
-				handle = @current_path
+				handle = File.join(@current_path, path)
         list = dir.entries(handle).map{|f| f.name}
         close(handle)
         return list
