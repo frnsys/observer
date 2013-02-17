@@ -13,7 +13,7 @@ module Net
 
       def rmdir(path)
         @current_path ||= '.'
-        method_missing :rmdir, File.join(@current_path, path)
+        wait_for( request :rmdir, File.join(@current_path, path) )
       end
 
       def chdir(path)
