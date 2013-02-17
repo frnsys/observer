@@ -10,6 +10,7 @@ end
 =end
 
 require File.expand_path( File.dirname(__FILE__) + "/../lib/observer.rb" )
+require File.expand_path( File.dirname(__FILE__) + "/../lib/observer/version.rb" )
 
 # Make console output pretty
 require "colored"
@@ -23,8 +24,18 @@ if ARGV.length <= 1
 		exit
 	end
 
-	puts "observer spawn => spawns a new Observer (.observer.yml) in the current directory"
-	puts "observer observe or observer watch, pass in a directory or nothing to default to current directory"
+	puts "\nObserver #{Observer::VERSION}\n".red +
+				"Developed by Francis Tseng (supermedes.com / @frnsys)\n".blue +
+				"observer spawn".yellow + "\t\t\t\t\t=> Spawns a new Observer (.observer) in the current directory.\n"+
+				"observer observe".yellow + "\t\t\t\t=> Watch current directory for changes and upload them.\n"+
+				"observer observe path/to/local/dir".yellow + "\t\t=> Watch specified directory for changes and upload them.\n"+
+				"observer push path/to/local/dir".yellow + "\t\t\t=> Upload specified local directory to remote. Can also specify a local file.\n"+
+				"observer pull path/to/remote/dir".yellow + "\t\t=> Download specified remote directory to local. Can also specify a remote file.\n"+
+				"						This path should be relative to the remote_path specified in your .observer file.\n"+
+				"observer syncup path/to/local/dir".yellow + "\t\t=> Will sync remote to the specified local directory.\n"+
+				"observer syncdown path/to/remote/dir".yellow + "\t\t=> Will sync local to the specified remote directory.\n"+
+				"						This paths hould be relative to the remote_path specified in your .observer file.\n\n"
+
 	exit
 end
 
@@ -37,11 +48,51 @@ end
 # Push (a single file or folder)
 if ["push", "upload"].include? ARGV[0]
 	o = Observer::Observer.new( nil )
-	o.push( ARGV[1] )
+
+	if ARGV[1] == "force" && ARGV[2]
+		o.push( ARGV[2], true )
+	elsif ARGV[1]
+		o.push( ARGV[1] )
+	else
+		puts "Please supply a file or directory to push.".red
+	end
 end
 
 # Pull (a single file or folder)
 if ["pull", "download"].include? ARGV[0]
 	o = Observer::Observer.new( nil )
-	o.pull( ARGV[1] )
+
+	if ARGV[1] == "force" && ARGV[2]
+		o.pull( ARGV[2], true )
+	elsif ARGV[1]
+		o.pull( ARGV[1] )
+	else
+		puts "Please supply a file or directory to pull.".red
+	end
+end
+
+# Sync remote with local (a single file or folder)
+if ["syncup", "pushsync"].include? ARGV[0]
+	o = Observer::Observer.new( nil )
+
+	if ARGV[1] == "force" && ARGV[2]
+		o.syncUp( ARGV[2], true )
+	elsif ARGV[1]
+		o.syncUp( ARGV[1] )
+	else
+		puts "Please supply a file or directory to sync up.".red
+	end
+end
+
+# Sync local with remote (a single file or folder)
+if ["syncdown", "pullsync"].include? ARGV[0]
+	o = Observer::Observer.new( nil )
+
+	if ARGV[1] == "force" && ARGV[2]
+		o.syncDown( ARGV[2], true )
+	elsif ARGV[1]
+		o.syncDown( ARGV[1] )
+	else
+		puts "Please supply a file or directory to sync down.".red
+	end
 end

@@ -21,31 +21,27 @@ module Observer
 			# od = Observer directory. Where the Observer resides
 			# Search up to find an Observer
 			@od = @wd
-			while !File.exists?(@od + "/.observer.yml") do
+			while !File.exists?(@od + "/.observer") do
 				@od = File.expand_path( File.join(@od, "..") )
 
 				if ( @od == "/" )
-					puts ".observer.yml couldn't be found.".red
+					puts "A .observer couldn't be found.".red
 					puts "Create one with " + "'observer spawn'".blue
 					exit
 				end
 			end
 
 			prepPath( @od )
-			puts "Found Observer at #{@od}.observer.yml".magenta
-			o = YAML.load_file(@od + ".observer.yml")
+			puts "Found Observer at #{@od}.observer".magenta
+			o = YAML.load_file(@od + ".observer")
 
 			@type = o["type"]
 			@user = o["user"]
 			@password = o["password"] || nil
 			@ignore = o["ignore"]
-
-			# Remove the leading "/" if necessary
+			@connection = nil
 			@server = clipRoot( o["server"] )
 			@remote_path = prepPath( o["remote_path"] )
-
-			puts "@od => #{@od}".green
-			puts "@remote_path => #{@remote_path}".green
 
 			# Default to the current directory
 			# Ward is the target: a directory to watch or sync, or a file to sync
@@ -61,7 +57,7 @@ module Observer
 
 			# Observer prototype and new "instance"
 			sdo = sd + "observer/observer.yml"
-			wdo = @wd + ".observer.yml"
+			wdo = @wd + ".observer"
 
 			if File.exist?( wdo )
 				puts "An Observer already exists here, do you want to replace it? (y/n)".red
@@ -73,31 +69,28 @@ module Observer
 
 			puts "Spawning observer...".blue
 			FileUtils.cp( sdo, wdo )
-			puts ".observer.yml".green + " was created for this directory." + " Please configure it for your server.".green
+			puts "A .observer".green + " was created for this directory." + " Please configure it for your server.".green
 
 			# Try to add the Observer to the gitignore
 			gitignore = File.join(@wd, ".gitignore")
 			if File.exist?( gitignore )
 				open(gitignore, 'a') do |f|
-				  f << ".observer.yml"
+				  f << "\n.observer"
 				end
-				puts "Your gitignore was modified to include .observer.yml."
+				puts "Your gitignore was modified to include '.observer.'"
 			else
 				puts "A gitignore file could not be found. "\
-						 "It's recommended to keep your .observer.yml "\
+						 "It's recommended to keep your .observer "\
 						 "out of versioning since it may contain sensitive information.".red
 			end
-
 		end
 
 		# Push
 		def push( item, force=false )
-			# TESTING
-			#transfer( item, "push", force )
-			prune( item, "push", force )
+			transfer( item, "push", force )
 		end
 
-		# Sync local to remote
+		# Sync remote with local (i.e. make remote match local)
 		# Will delete items not present on local
 		def syncUp( item, force=false )
 			transfer( item, "push", force )
@@ -111,7 +104,7 @@ module Observer
 			transfer( item, "pull", force )
 		end
 
-		# Sync remote to local
+		# Sync local with remote (i.e. make local match remote)
 		# Will delete items not present on remote
 		def syncDown( item, force=false )
 			transfer( item, "pull", force )
@@ -127,15 +120,15 @@ module Observer
 			# Props to rjfranco (https://github.com/rjfranco)
 			# for the basis of this code:
 			while true do
-				newfiles = collectLocalFiles( @ward )
+				new_files = collectLocalFiles( @ward )
 
 				# Compare
-				files ||= newfiles
-				dfiles = newfiles.to_a - files.to_a
+				files ||= new_files
+				diff = new_files.to_a - files.to_a
 
-				unless dfiles.empty?
-					files = newfiles
-					dfiles.each do |f|
+				unless diff.empty?
+					files = new_files
+					diff.each do |f|
 						puts f[0].red + " was changed. Syncing..."
 						transferFile( f, "push" )
 					end
@@ -146,9 +139,7 @@ module Observer
 		end
 
 		private
-		def connect( block )
-			# If the Observer's password is left unspecified,
-				# ask for one
+		def connect
 			if !@password
 				puts "Password:"
 				@password = STDIN.gets.chomp
@@ -163,32 +154,29 @@ module Observer
 				rescue Net::FTPPermError
 					puts "Login incorrect.".red
 					exit
-				else
-					ftp.passive = true
-
-					# Since FTP puts us in the server's root dir,
-					# we need to look for the "public" or "www" dir:
-					# ====================================================
-					# This may need revising.
-					# NOTE need to let it first try the supplied directory,
-					# if not, try the following two:
-					ftp.nlst().each do |dir|
-						if ["public", "www"].include?(dir)
-							ftp.chdir(dir)
-							break
-						end
-					end
-
-					block.call( ftp )
-
-					ftp.close()
 				end
+
+				ftp.passive = true
+
+				# Since FTP puts us in the server's root dir,
+				# we need to look for the "public" or "www" dir:
+				# ====================================================
+				# This may need revising.
+				# NOTE need to let it first try the supplied directory,
+				# if not, try the following two:
+				ftp.nlst().each do |dir|
+					if ["public", "www"].include?(dir)
+						ftp.chdir(dir)
+						break
+					end
+				end
+
+				@connection = ftp
 
 			# SFTP
 			elsif @type.casecmp("sftp") == 0
-				Net::SFTP.start( @server, @user, :password => @password ) do |sftp|
-					block.call( sftp )
-				end
+				sftp = Net::SFTP.start( @server, @user, :password => @password )
+				@connection = sftp
 
 			else
 				puts "Unrecognized protocol. Please use either 'ftp' or 'sftp'".red
@@ -199,6 +187,7 @@ module Observer
 
 		def close
 			@connection.close
+			puts "Disconnecting from #{@server}...".blue
 		end
 
 		def transfer( item, direction, force )
@@ -217,7 +206,8 @@ module Observer
 
 			end
 		end
-		def transferFile( file, direction, force )
+		def transferFile( file, direction, force=false )
+			connect unless @connection
 			params = Hash.new
 
 			# Prepare filepaths
@@ -226,24 +216,22 @@ module Observer
 			params[:l_file] = passed_file.sub( @remote_path, @od )
 			params[:r_dirs] = params[:r_file].split(File::SEPARATOR)[0...-1]
 			params[:l_dirs] = params[:l_file].split(File::SEPARATOR)[1...-1]
-			#params[:filename] = File.basename(passed_file)
 
-			proc = Proc.new do |ftp|
-				if UP.include? direction
-					upload( ftp, params, force )
-				elsif DOWN.include? direction
-					download( ftp, params, force )
-				else
-					puts "Unrecognized direction."
-					exit
-				end
+			if UP.include? direction
+				upload( params, force )
+			elsif DOWN.include? direction
+				download( params, force )
+			else
+				puts "Unrecognized direction."
+				close
+				exit
 			end
-
-			connect( proc )
 		end
 
 		# Upload a file
-		def upload( ftp, params, force )
+		def upload( params, force )
+			connect unless @connection
+			c = @connection
 			r_file = params[:r_file]
 			r_dirs = params[:r_dirs]
 			l_file = params[:l_file]
@@ -254,38 +242,36 @@ module Observer
 			prev_dir = ""
 			r_dirs.each do |dir|
 				dirpath = clipRoot( File.join(prev_dir, dir) )
-				puts "prev_dir => #{prev_dir}"
-				puts "dir => #{dir}"
-				puts "dirpath => #{dirpath}"
 				# This long thing is to introduce consistency
 				# in how Net::FTP and Net::SFTP return their listings
-				if !ftp.nlst(prev_dir).map { |item| item.split(File::SEPARATOR).last }.include?(dir)
+				if !c.nlst(prev_dir).map { |item| item.split(File::SEPARATOR).last }.include?(dir)
 					puts "Making #{dirpath}"
-					ftp.mkdir(dirpath)
+					c.mkdir(dirpath)
 				end
 				prev_dir = dirpath
 			end
-			exit
 
 			# Check for existing remote file
 			# and compare modification time
-			if ftp.nlst(prev_dir).include?(File.basename(r_file)) && !force
-				if ftp.mtime(r_file).to_i > File.stat(l_file).mtime.to_i
+			if c.nlst(prev_dir).include?(File.basename(r_file)) && !force
+				if c.mtime(r_file).to_i > File.stat(l_file).mtime.to_i
 						puts "The file you are uploading is older than the one on the server. "\
 								 "Do you want to overwrite the remote file? (y/n)".red
 						if !yes?( STDIN.gets.chomp )
-							ftp.close()
+							close
 							return
 						end
 				end
 			end
 
-			ftp.putbinaryfile(l_file, r_file)
+			c.putbinaryfile(l_file, r_file)
 			puts "Upload successful.".green
 		end
 
 		# Download a file
-		def download( ftp, params, force )
+		def download( params, force )
+			connect unless @connection
+			c = @connection
 			l_file = params[:l_file]
 			l_dirs = params[:l_dirs]
 			r_file = params[:r_file]
@@ -306,18 +292,18 @@ module Observer
 			# Check for existing local file
 			# and compare modification time
 			if Dir.entries(prev_dir).include?(File.basename(l_file)) && !force
-				if ftp.mtime(r_file).to_i < File.stat(l_file).mtime.to_i
+				if c.mtime(r_file).to_i < File.stat(l_file).mtime.to_i
 						puts "The file you are downloading is older than the one on your machine. "\
 								 "Do you want to overwrite the local file? (y/n)".red
 						if !yes?( STDIN.gets.chomp )
-							ftp.close()
+							close
 							return
 						end
 				end
 			end
 
 			begin
-				ftp.getbinaryfile(r_file, l_file)
+				c.getbinaryfile(r_file, l_file)
 			rescue
 				# File doesn't exist
 				puts "#{r_file} doesn't seem to exist!".red
@@ -327,6 +313,9 @@ module Observer
 
 		# Get rid of extra files and folders
 		def prune( folder, direction, force )
+			connect unless @connection
+			c = @connection
+
 			l_files = collectLocalFiles( folder, true ).keys.map { |file| File.expand_path( file ) }
 			r_files = collectRemoteFiles( folder ).keys
 
@@ -334,20 +323,17 @@ module Observer
 				l_files.map! { |file| file.sub( @od, clipRoot(@remote_path) ) }
 				diff = r_files - l_files
 
-				proc = Proc.new do |ftp|
-					diff.reverse.each do |item|
-						# Is directory
-						if ftp.nlst(item).length > 1
-							ftp.rmdir(item)
+				diff.reverse.each do |item|
+					# Is directory
+					if c.nlst(item).length > 1
+						c.rmdir(item)
 
-						# Is a file
-						else
-							ftp.delete(item)
-						end
+					# Is a file
+					else
+						c.delete(item)
 					end
 				end
 
-				connect( proc )
 
 			elsif DOWN.include?(direction)
 				r_files.map! { |file| file.sub( clipRoot(@remote_path), @od ) }
@@ -367,6 +353,7 @@ module Observer
 
 			else
 				puts "Unrecognized direction."
+				close
 				exit
 			end
 		end
@@ -391,17 +378,15 @@ module Observer
 		end
 		def collectRemoteFiles( folder )
 			r_path = clipRoot( prepPath( File.expand_path( folder ) ).sub( @od, @remote_path ) )
-
-			proc = Proc.new do |ftp|
-				return remoteFind( ftp, r_path, {} )
-			end
-
-			connect( proc )
+			return remoteFind( r_path, {} )
 		end
 
 		# A remote version of File.find
-		def remoteFind( ftp, path, hash )
-			ftp.nlst(path).each do |item|
+		def remoteFind( path, hash )
+			connect unless @connection
+			c = @connection
+
+			c.nlst(path).each do |item|
 				next if @ignore.include?( File.basename(item) )
 
 				# To prevent looping & redundancy
@@ -411,7 +396,7 @@ module Observer
 				# Net::FTP will throw an FTPPermError
 				# if trying to mtime a directory.
 				begin
-					hash[item] = ftp.mtime(item).to_i
+					hash[item] = c.mtime(item).to_i
 				rescue Net::FTPPermError
 					hash[item] = "n/a"
 				end
@@ -420,12 +405,12 @@ module Observer
 				# any reliable equivalent of File.directory?
 				# for remote files.
 				# However, there's a heuristic we can use.
-				# ftp.nlst(item).length > 1 means it's a directory,
+				# c.nlst(item).length > 1 means it's a directory,
 				# since it will include at the very least "item/."
 				# and "item/.." (i.e. have a length of 2). If it's
 				# a file, only the file itself will be included.
-				if ftp.nlst(item).length > 1
-					remoteFind( ftp, item, hash )
+				if c.nlst(item).length > 1
+					remoteFind( item, hash )
 				end
 			end
 			return hash
