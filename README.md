@@ -1,5 +1,5 @@
-# Observer
-### Developed by Francis Tseng ([supermedes.com](http://www.supermedes.com) / @frnsys)
+# [Observer](http://supermedes.com/labs/observer/)
+Developed by Francis Tseng ([supermedes.com](http://www.supermedes.com) / @frnsys)
 
 A command line tool that will watch a directory for changes & sync it to a remote directory (ftp or sftp)
  
