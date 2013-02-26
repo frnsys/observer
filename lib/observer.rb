@@ -5,7 +5,7 @@ require "net/sftp"
 require "find"
 require "fileutils"
 require "colored"
-require_relative "observer/sftp_compatibility.rb"
+require File.join(File.dirname(__FILE__), 'observer/sftp_compatibility.rb')
 
 module Observer
   class Observer
