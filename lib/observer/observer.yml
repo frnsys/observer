@@ -6,7 +6,7 @@ user: username
 port: 22
 remote_path: /
 ignore:
-  - .observer.yml
+  - .observer
   - .git
   - .gitignore
   - .svn
