@@ -22,6 +22,9 @@ if ARGV.length <= 1
 	if ARGV[0] == "spawn"
 		Observer::Observer.spawn()
 		exit
+	elsif ["observe", "watch"].include? ARGV[0]
+		o = Observer::Observer.new( "." )
+		o.observe()
 	end
 
 	puts "\nObserver #{Observer::VERSION}\n".red +

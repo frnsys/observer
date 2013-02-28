@@ -4,6 +4,7 @@ require "net/ftp"
 require "net/sftp"
 require "find"
 require "fileutils"
+require "io/console"
 require "colored"
 require File.join(File.dirname(__FILE__), 'observer/sftp_compatibility.rb')
 
@@ -130,7 +131,7 @@ module Observer
 					files = new_files
 					diff.each do |f|
 						puts f[0].red + " was changed. Syncing..."
-						transferFile( f, "push" )
+						transferFile( f[0], "push" )
 					end
 				end
 
@@ -142,7 +143,7 @@ module Observer
 		def connect
 			if !@password
 				puts "Password:"
-				@password = STDIN.gets.chomp
+				@password = STDIN.noecho(&:gets).chomp
 			end
 
 			puts "Connecting to #{@server}...".blue
@@ -245,20 +246,31 @@ module Observer
 				# This long thing is to introduce consistency
 				# in how Net::FTP and Net::SFTP return their listings
 				if !c.nlst(prev_dir).map { |item| item.split(File::SEPARATOR).last }.include?(dir)
-					puts "Making #{dirpath}"
-					c.mkdir(dirpath)
+					begin
+						c.mkdir(dirpath)
+						puts "Making #{dirpath}"
+					rescue Net::FTPPermError
+						# FTP will throw a 550 error if the directory being created
+						# already exists. I'm not sure why the existing directory
+						# wouldn't already be listed with nlst(), but I have encountered
+						# this problem.
+						if $!.message[0..2] != "550"
+							puts "There was an error while creating missing directories.".red
+							exit
+						end
+					end
 				end
 				prev_dir = dirpath
 			end
 
 			# Check for existing remote file
 			# and compare modification time
-			if c.nlst(prev_dir).include?(File.basename(r_file)) && !force
+			current_files = c.nlst(prev_dir).map { |item| item.gsub!("\\", "/").split(File::SEPARATOR).last }
+			if current_files.include?(File.basename(r_file)) && !force
 				if c.mtime(r_file).to_i > File.stat(l_file).mtime.to_i
 						puts "The file you are uploading is older than the one on the server. "\
 								 "Do you want to overwrite the remote file? (y/n)".red
 						if !yes?( STDIN.gets.chomp )
-							close
 							return
 						end
 				end
