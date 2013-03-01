@@ -88,29 +88,33 @@ module Observer
 
 		# Push
 		def push( item, force=false )
-			transfer( item, "push", force )
+			opts = { :force => force, :direction => "push" }
+			transfer( item, opts )
 		end
 
 		# Sync remote with local (i.e. make remote match local)
 		# Will delete items not present on local
-		def syncUp( item, force=false )
-			transfer( item, "push", force )
+		def syncUp( item )
+			opts = { :direction => "push", :silent => true }
+			transfer( item, opts )
 			if File.directory?(item)
-				prune( item, "push", force )
+				prune( item, opts )
 			end
 		end
 
 		# Pull
 		def pull( item, force=false )
-			transfer( item, "pull", force )
+			opts = { :force => force, :direction => "pull" }
+			transfer( item, opts )
 		end
 
 		# Sync local with remote (i.e. make local match remote)
 		# Will delete items not present on remote
-		def syncDown( item, force=false )
-			transfer( item, "pull", force )
+		def syncDown( item )
+			opts = { :direction => "pull", :silent => true }
+			transfer( item, opts )
 			if File.directory?(item)
-				prune( item, "pull", force )
+				prune( item, opts )
 			end
 		end
 
@@ -131,7 +135,7 @@ module Observer
 					files = new_files
 					diff.each do |f|
 						puts f[0].red + " was changed. Syncing..."
-						transferFile( f[0], "push" )
+						transferFile( f[0], { :direction => "push" } )
 					end
 				end
 
@@ -191,25 +195,26 @@ module Observer
 			puts "Disconnecting from #{@server}...".blue
 		end
 
-		def transfer( item, direction, force )
-			item = item || @ward
+		def transfer( item, opts )
+			item ||= @ward
 
 			# If it's a directory, we should load up everything
 			if File.directory?(item)
 				files = collectLocalFiles( item )
 				files.each do |file|
-					transferFile( file[0], direction, force )
+					transferFile( file[0], opts )
 				end
 
 			# Otherwise just sync
 			else
-				transferFile( item, direction, force )
+				transferFile( item, opts )
 
 			end
 		end
-		def transferFile( file, direction, force=false )
+		def transferFile( file, opts )
 			connect unless @connection
 			params = Hash.new
+			opts ||= {}
 
 			# Prepare filepaths
 			passed_file = File.expand_path(file)
@@ -218,10 +223,10 @@ module Observer
 			params[:r_dirs] = params[:r_file].split(File::SEPARATOR)[0...-1]
 			params[:l_dirs] = params[:l_file].split(File::SEPARATOR)[1...-1]
 
-			if UP.include? direction
-				upload( params, force )
-			elsif DOWN.include? direction
-				download( params, force )
+			if UP.include? opts[:direction]
+				upload( params, opts )
+			elsif DOWN.include? opts[:direction]
+				download( params, opts )
 			else
 				puts "Unrecognized direction."
 				close
@@ -230,14 +235,13 @@ module Observer
 		end
 
 		# Upload a file
-		def upload( params, force )
+		def upload( params, opts )
 			connect unless @connection
 			c = @connection
+			opts ||= {}
 			r_file = params[:r_file]
 			r_dirs = params[:r_dirs]
 			l_file = params[:l_file]
-
-			puts "Uploading #{r_file}...".blue
 
 			# Create remote dirs as necessary
 			prev_dir = ""
@@ -266,16 +270,22 @@ module Observer
 			# Check for existing remote file
 			# and compare modification time
 			current_files = c.nlst(prev_dir).map { |item| item.gsub!("\\", "/").split(File::SEPARATOR).last }
-			if current_files.include?(File.basename(r_file)) && !force
+			if current_files.include?(File.basename(r_file)) && !opts[:force]
 				if c.mtime(r_file).to_i > File.stat(l_file).mtime.to_i
+					# If silent == true, just skip to next file
+					if opts[:silent]
+						return
+					else
 						puts "The file you are uploading is older than the one on the server. "\
 								 "Do you want to overwrite the remote file? (y/n)".red
 						if !yes?( STDIN.gets.chomp )
 							return
 						end
+					end
 				end
 			end
 
+			puts "Uploading #{r_file}...".blue
 			c.putbinaryfile(l_file, r_file)
 			puts "Upload successful.".green
 		end
@@ -287,8 +297,6 @@ module Observer
 			l_file = params[:l_file]
 			l_dirs = params[:l_dirs]
 			r_file = params[:r_file]
-
-			puts "Downloading #{r_file}...".blue
 
 			# Create local dirs as necessary
 			prev_dir = "/"
@@ -315,6 +323,7 @@ module Observer
 			end
 
 			begin
+				puts "Downloading #{r_file}...".blue
 				c.getbinaryfile(r_file, l_file)
 			rescue
 				# File doesn't exist
@@ -324,14 +333,14 @@ module Observer
 		end
 
 		# Get rid of extra files and folders
-		def prune( folder, direction, force )
+		def prune( folder, opts )
 			connect unless @connection
 			c = @connection
 
 			l_files = collectLocalFiles( folder, true ).keys.map { |file| File.expand_path( file ) }
 			r_files = collectRemoteFiles( folder ).keys
 
-			if UP.include?(direction)
+			if UP.include?(opts[:direction])
 				l_files.map! { |file| file.sub( @od, clipRoot(@remote_path) ) }
 				diff = r_files - l_files
 
@@ -347,11 +356,11 @@ module Observer
 				end
 
 
-			elsif DOWN.include?(direction)
+			elsif DOWN.include?(opts[:direction])
 				r_files.map! { |file| file.sub( clipRoot(@remote_path), @od ) }
 				diff = l_files - r_files
 
-				if diff.length > 0 && !force
+				if diff.length > 0 && !opts[:force]
 					puts "The following files will be deleted:".red
 					puts diff
 					puts "Do you want to continue? (y/n)".red

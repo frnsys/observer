@@ -1,14 +1,5 @@
 #!/usr/bin/env ruby
 
-=begin
-begin
-  require 'observer'
-rescue LoadError
-  require 'rubygems'
-  require 'observer'
-end
-=end
-
 require File.expand_path( File.dirname(__FILE__) + "/../lib/observer.rb" )
 require File.expand_path( File.dirname(__FILE__) + "/../lib/observer/version.rb" )
 
@@ -78,9 +69,7 @@ end
 if ["syncup", "pushsync"].include? ARGV[0]
 	o = Observer::Observer.new( nil )
 
-	if ARGV[1] == "force" && ARGV[2]
-		o.syncUp( ARGV[2], true )
-	elsif ARGV[1]
+	if ARGV[1]
 		o.syncUp( ARGV[1] )
 	else
 		puts "Please supply a file or directory to sync up.".red
@@ -91,9 +80,7 @@ end
 if ["syncdown", "pullsync"].include? ARGV[0]
 	o = Observer::Observer.new( nil )
 
-	if ARGV[1] == "force" && ARGV[2]
-		o.syncDown( ARGV[2], true )
-	elsif ARGV[1]
+	if ARGV[2]
 		o.syncDown( ARGV[1] )
 	else
 		puts "Please supply a file or directory to sync down.".red

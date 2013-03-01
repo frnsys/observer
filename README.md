@@ -47,8 +47,6 @@ $ observer syncdown /path/to/remote/dir
 
 ## To Do / Known Issues
 * FTP observing is timing out
-* Add an option to sync (push/pull) that only uploads/downloads changed
-	files, so you aren't assaulted with a lot of confirmation messages.
 
 ## Contributing
 This is still a work in progress and can use improving, so please contribute!
