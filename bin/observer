@@ -28,7 +28,8 @@ if ARGV.length <= 1
 				"						This path should be relative to the remote_path specified in your .observer file.\n"+
 				"observer syncup path/to/local/dir".yellow + "\t\t=> Will sync remote to the specified local directory.\n"+
 				"observer syncdown path/to/remote/dir".yellow + "\t\t=> Will sync local to the specified remote directory.\n"+
-				"						This paths hould be relative to the remote_path specified in your .observer file.\n\n"
+				"						This paths should be relative to the remote_path specified in your .observer file.\n\n"+
+				"Note that 'syncing' means overwriting older files with newer files and deleting files that are no longer at the origin.\n\n"
 
 	exit
 end
